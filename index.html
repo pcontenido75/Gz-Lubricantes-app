@@ -1,414 +1,290 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GZ Lubricantes - Panel Administrativo</title>
-  
-  <!-- Tailwind CSS para Estilos Modernos -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  
-  <!-- Babel para procesar React y JSX en vivo desde el móvil -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  
-  <!-- Mapeo de Módulos (Importmap) para Firebase y React -->
-  <script type="importmap">
-    {
-      "imports": {
-        "react": "https://esm.sh/react@18.2.0",
-        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-        "firebase/app": "https://esm.sh/firebase@10.8.0/app",
-        "firebase/auth": "https://esm.sh/firebase@10.8.0/auth",
-        "firebase/firestore": "https://esm.sh/firebase@10.8.0/firestore"
-      }
-    }
-  </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GZ Lubricantes - Panel Administrador</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0a0a0a; }
+        ::-webkit-scrollbar-thumb { background: #262626; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #dc2626; }
+    </style>
 </head>
-<body class="bg-neutral-950 text-neutral-100 antialiased">
+<body class="bg-neutral-950 text-neutral-100 min-h-screen antialiased">
 
-  <!-- Contenedor Raíz de React -->
-  <div id="root"></div>
+    <div id="root"></div>
 
-  <!-- Código de la Aplicación -->
-  <script type="text/babel" data-type="module">
-    import React, { useState, useEffect, useMemo, useRef } from 'react';
-    import { createRoot } from 'react-dom/client';
-    import { initializeApp } from 'firebase/app';
-    import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-    import { getFirestore, doc, setDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
 
-    // --- CONFIGURACIÓN DE FIREBASE CON SEGURO ANTI-FALLOS ---
-    let firebaseConfig = {
-      apiKey: "FailsafeKeyForPreviewOnly",
-      authDomain: "gz-lubricantes.firebaseapp.com",
-      projectId: "gz-lubricantes",
-      storageBucket: "gz-lubricantes.appspot.com",
-      messagingSenderId: "000000000",
-      appId: "1:000000000:web:000000"
-    };
+        // 🔑 CONFIGURACIÓN DE FIREBASE
+        // Si tienes tus llaves de Firebase, reemplaza estos textos. Si no, déjalos así para modo local.
+        const firebaseConfig = {
+            apiKey: "TU_API_KEY_AQUI",
+            authDomain: "TU_AUTH_DOMAIN_AQUI",
+            projectId: "TU_PROJECT_ID_AQUI",
+            storageBucket: "TU_STORAGE_BUCKET_AQUI",
+            messagingSenderId: "TU_MESSAGING_SENDER_ID_AQUI",
+            appId: "TU_APP_ID_AQUI"
+        };
 
-    try {
-      if (typeof __firebase_config !== 'undefined') {
-        firebaseConfig = JSON.parse(__firebase_config);
-      }
-    } catch (e) {
-      console.warn("Usando credenciales de prueba locales.");
-    }
-
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'gz-lubricantes-app';
-
-    const CATEGORIES = ['Aceites Sintéticos', 'Aceites Semi-Sintéticos', 'Aceites Minerales', 'Líquidos de Freno', 'Grasas y Aditivos', 'Transmisión y Engranajes', 'Filtros', 'Otros'];
-    const CURRENCIES = [
-      { code: 'USD', name: 'Dólares ($)', symbol: '$' },
-      { code: 'VES', name: 'Bolívares (Bs)', symbol: 'Bs' },
-      { code: 'EUR', name: 'Euros (€)', symbol: '€' }
-    ];
-
-    function App() {
-      const [user, setUser] = useState(null);
-      const [products, setProducts] = useState([]);
-      const [sales, setSales] = useState([]);
-      const [loading, setLoading] = useState(true);
-      const [activeTab, setActiveTab] = useState('dashboard');
-      const [searchQuery, setSearchQuery] = useState('');
-      const [categoryFilter, setCategoryFilter] = useState('');
-      
-      const [showProductModal, setShowProductModal] = useState(false);
-      const [editingProduct, setEditingProduct] = useState(null);
-      const [showSaleModal, setShowSaleModal] = useState(false);
-      const [selectedProductForSale, setSelectedProductForSale] = useState(null);
-      const [saleQuantity, setSaleQuantity] = useState(1);
-      const [paymentCurrency, setPaymentCurrency] = useState('USD');
-      const [notification, setNotification] = useState(null);
-
-      const [prodForm, setProdForm] = useState({
-        name: '', sku: '', category: 'Aceites Sintéticos', costPrice: '', sellingPrice: '', stock: '', minStock: '', image: ''
-      });
-
-      const fileInputRef = useRef(null);
-
-      const triggerNotification = (message, type = 'success') => {
-        setNotification({ message, type });
-        setTimeout(() => setNotification(null), 4000);
-      };
-
-      useEffect(() => {
-        const initAuth = async () => {
-          try {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-              await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-              await signInAnonymously(auth);
+        let db = null;
+        if (firebaseConfig.apiKey && firebaseConfig.apiKey !== "TU_API_KEY_AQUI") {
+            try {
+                firebase.initializeApp(firebaseConfig);
+                db = firebase.firestore();
+            } catch (error) {
+                console.error("Fallo de inicialización:", error);
             }
-          } catch (error) {
-            console.error("Error al autenticar:", error);
-            setLoading(false);
-          }
-        };
-        initAuth();
-
-        return onAuthStateChanged(auth, (usr) => {
-          setUser(usr);
-          if (!usr) setLoading(false);
-        });
-      }, []);
-
-      useEffect(() => {
-        if (!user) return;
-        setLoading(true);
-
-        const productsColRef = collection(db, 'artifacts', appId, 'public', 'data', 'products');
-        const salesColRef = collection(db, 'artifacts', appId, 'public', 'data', 'sales');
-
-        const unsubscribeProducts = onSnapshot(productsColRef, (snapshot) => {
-          setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-          setLoading(false);
-        }, () => setLoading(false));
-
-        const unsubscribeSales = onSnapshot(salesColRef, (snapshot) => {
-          const salesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          salesList.sort((a, b) => new Date(b.date) - new Date(a.date));
-          setSales(salesList);
-        });
-
-        return () => { unsubscribeProducts(); unsubscribeSales(); };
-      }, [user]);
-
-      const handleImageUpload = (e) => {
-        const file = e.target.files[0];
-        if (file) {
-          if (file.size > 1 * 1024 * 1024) {
-            triggerNotification('La imagen supera el límite de 1MB.', 'error');
-            return;
-          }
-          const reader = new FileReader();
-          reader.onloadend = () => setProdForm(prev => ({ ...prev, image: reader.result }));
-          reader.readAsDataURL(file);
         }
-      };
 
-      const stats = useMemo(() => {
-        const startOfWeek = new Date();
-        startOfWeek.setHours(0, 0, 0, 0);
-        startOfWeek.setDate(startOfWeek.getDate() - (startOfWeek.getDay() || 7) + 1);
+        function App() {
+            const [products, setProducts] = useState([]);
+            const [searchQuery, setSearchQuery] = useState('');
+            const [isModalOpen, setIsModalOpen] = useState(false);
+            const [editingProduct, setEditingProduct] = useState(null);
 
-        const weeklySales = sales.filter(sale => new Date(sale.date) >= startOfWeek);
-        const profits = { USD: 0, VES: 0, EUR: 0 };
-        const revenues = { USD: 0, VES: 0, EUR: 0 };
+            const [formData, setFormData] = useState({
+                name: '', brand: '', type: 'Mineral', viscosity: '20W-50', costPrice: '', sellingPrice: '', stock: ''
+            });
 
-        weeklySales.forEach(sale => {
-          const cur = sale.currency || 'USD';
-          if (profits[cur] !== undefined) {
-            profits[cur] += sale.profit || 0;
-            revenues[cur] += (sale.sellingPrice * sale.quantity) || 0;
-          }
-        });
+            useEffect(() => {
+                if (db) {
+                    const unsubscribe = db.collection('products').onSnapshot((snapshot) => {
+                        const pList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        setProducts(pList);
+                        localStorage.setItem('gz_backup', JSON.stringify(pList));
+                    }, () => loadLocalBackup());
+                    return () => unsubscribe();
+                } else {
+                    loadLocalBackup();
+                }
+            }, []);
 
-        const lowStockProducts = products.filter(p => p.stock <= p.minStock);
-        const totalInventoryValue = products.reduce((sum, p) => sum + (p.costPrice * p.stock), 0);
+            const loadLocalBackup = () => {
+                const data = localStorage.getItem('gz_backup');
+                if (data) {
+                    setProducts(JSON.parse(data));
+                } else {
+                    const demo = [
+                        { id: '1', name: 'Aceite de Motor Premium', brand: 'Shell', type: 'Sintético', viscosity: '10W-30', costPrice: 6.5, sellingPrice: 10.0, stock: 12 },
+                        { id: '2', name: 'Lubricante Multigrado', brand: 'Castrol', type: 'Mineral', viscosity: '20W-50', costPrice: 5.0, sellingPrice: 8.5, stock: 3 }
+                    ];
+                    setProducts(demo);
+                    localStorage.setItem('gz_backup', JSON.stringify(demo));
+                }
+            };
 
-        return { profits, revenues, lowStockCount: lowStockProducts.length, totalProducts: products.length, totalInventoryValue };
-      }, [products, sales]);
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                const currentData = {
+                    name: formData.name,
+                    brand: formData.brand,
+                    type: formData.type,
+                    viscosity: formData.viscosity,
+                    costPrice: parseFloat(formData.costPrice) || 0,
+                    sellingPrice: parseFloat(formData.sellingPrice) || 0,
+                    stock: parseInt(formData.stock) || 0
+                };
 
-      const openAddProductModal = () => {
-        setEditingProduct(null);
-        setProdForm({ name: '', sku: `GZ-${Math.floor(1000 + Math.random() * 9000)}`, category: 'Aceites Sintéticos', costPrice: '', sellingPrice: '', stock: '', minStock: '4', image: '' });
-        setShowProductModal(true);
-      };
+                if (db) {
+                    if (editingProduct) await db.collection('products').doc(editingProduct.id).update(currentData);
+                    else await db.collection('products').add(currentData);
+                } else {
+                    let list = [...products];
+                    if (editingProduct) list = list.map(p => p.id === editingProduct.id ? { ...p, ...currentData } : p);
+                    else list.push({ id: Date.now().toString(), ...currentData });
+                    setProducts(list);
+                    localStorage.setItem('gz_backup', JSON.stringify(list));
+                }
+                closeModal();
+            };
 
-      const saveProduct = async (e) => {
-        e.preventDefault();
-        const payload = {
-          name: prodForm.name, sku: prodForm.sku, category: prodForm.category,
-          costPrice: parseFloat(prodForm.costPrice), sellingPrice: parseFloat(prodForm.sellingPrice),
-          stock: parseInt(prodForm.stock), minStock: parseInt(prodForm.minStock), image: prodForm.image || ''
-        };
+            const handleDelete = async (id) => {
+                if (!confirm('¿Eliminar este producto?')) return;
+                if (db) {
+                    await db.collection('products').doc(id).delete();
+                } else {
+                    const list = products.filter(p => p.id !== id);
+                    setProducts(list);
+                    localStorage.setItem('gz_backup', JSON.stringify(list));
+                }
+            };
 
-        try {
-          if (editingProduct) {
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', editingProduct.id), payload);
-            triggerNotification('Cambios guardados con éxito.');
-          } else {
-            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'products'), payload);
-            triggerNotification('Nuevo producto registrado.');
-          }
-          setShowProductModal(false);
-        } catch (err) {
-          triggerNotification('Error al guardar en la nube.', 'error');
-        }
-      };
+            const openModal = (product = null) => {
+                if (product) {
+                    setEditingProduct(product);
+                    setFormData({ ...product });
+                } else {
+                    setEditingProduct(null);
+                    setFormData({ name: '', brand: '', type: 'Mineral', viscosity: '20W-50', costPrice: '', sellingPrice: '', stock: '' });
+                }
+                setIsModalOpen(true);
+            };
 
-      const registerSale = async (e) => {
-        e.preventDefault();
-        const qty = parseInt(saleQuantity);
-        if (qty > selectedProductForSale.stock) return;
+            const closeModal = () => { setIsModalOpen(false); setEditingProduct(null); };
 
-        const totalProfit = (selectedProductForSale.sellingPrice - selectedProductForSale.costPrice) * qty;
+            const filtered = useMemo(() => {
+                return products.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.brand.toLowerCase().includes(searchQuery.toLowerCase()));
+            }, [products, searchQuery]);
 
-        try {
-          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'sales'), {
-            productId: selectedProductForSale.id, productName: selectedProductForSale.name,
-            quantity: qty, costPrice: selectedProductForSale.costPrice, sellingPrice: selectedProductForSale.sellingPrice,
-            profit: totalProfit, currency: paymentCurrency, date: new Date().toISOString()
-          });
+            const metrics = useMemo(() => {
+                return {
+                    total: products.length,
+                    low: products.filter(p => p.stock <= 5).length,
+                    value: products.reduce((acc, p) => acc + (p.sellingPrice * p.stock), 0)
+                };
+            }, [products]);
 
-          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', selectedProductForSale.id), {
-            stock: selectedProductForSale.stock - qty
-          });
-
-          setShowSaleModal(false);
-          triggerNotification('Venta registrada con éxito.');
-        } catch (err) {
-          triggerNotification('Error al procesar transaccion.', 'error');
-        }
-      };
-
-      const filteredProducts = useMemo(() => {
-        return products.filter(p => {
-          const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.sku.toLowerCase().includes(searchQuery.toLowerCase());
-          const matchesCategory = categoryFilter === '' || p.category === categoryFilter;
-          return matchesSearch && matchesCategory;
-        });
-      }, [products, searchQuery, categoryFilter]);
-
-      if (loading) {
-        return (
-          <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center">
-            <div className="bg-red-600 text-white p-4 rounded-xl font-black text-3xl animate-pulse">GZ</div>
-            <p className="mt-4 text-sm font-bold text-neutral-400">Sincronizando Base de Datos...</p>
-          </div>
-        );
-      }
-
-      return (
-        <div className="min-h-screen flex flex-col">
-          <header className="bg-neutral-900 border-b border-red-600 p-4 sticky top-0 z-40">
-            <div className="max-w-7xl mx-auto flex justify-between items-center">
-              <div className="flex items-center space-x-3">
-                <div className="bg-red-600 text-white px-3 py-1.5 rounded-lg font-black text-xl">GZ</div>
-                <div>
-                  <h1 className="font-bold text-lg text-white leading-none">GZ LUBRICANTES</h1>
-                  <span className="text-[10px] text-emerald-400 font-semibold uppercase tracking-wider">● En Línea</span>
-                </div>
-              </div>
-            </div>
-          </header>
-
-          {/* Menú de pestañas para móvil */}
-          <div className="flex bg-neutral-900 p-1 border-b border-neutral-800 sticky top-[73px] z-30">
-            {['dashboard', 'inventory', 'sales'].map((tab) => (
-              <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 py-2 text-xs font-bold uppercase rounded-md transition ${activeTab === tab ? 'bg-red-600 text-white' : 'text-neutral-400'}`}>
-                {tab === 'dashboard' ? 'Panel' : tab === 'inventory' ? 'Inventario' : 'Ventas'}
-              </button>
-            ))}
-          </div>
-
-          <main className="flex-1 p-4 max-w-7xl w-full mx-auto space-y-6">
-            
-            {/* VISTA: PANEL */}
-            {activeTab === 'dashboard' && (
-              <div className="space-y-6">
-                <div className="bg-neutral-900 p-4 rounded-xl border border-neutral-800 flex justify-between items-center">
-                  <div>
-                    <h2 className="text-xl font-black">Panel General</h2>
-                    <p className="text-xs text-neutral-400">Métricas acumuladas del inventario.</p>
-                  </div>
-                  <button onClick={openAddProductModal} className="bg-red-600 text-white font-bold text-xs px-3 py-2 rounded-lg">
-                    + Agregar Aceite
-                  </button>
-                </div>
-
-                {/* Tarjetas de Indicadores */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-neutral-900 p-3 rounded-xl border border-neutral-800">
-                    <p className="text-xs text-neutral-400">Modelos en Stock</p>
-                    <p className="text-xl font-black text-white">{stats.totalProducts}</p>
-                  </div>
-                  <div className="bg-neutral-900 p-3 rounded-xl border border-neutral-800">
-                    <p className="text-xs text-neutral-400">Bajo Stock (Alerta)</p>
-                    <p className="text-xl font-black text-red-500">{stats.lowStockCount}</p>
-                  </div>
-                </div>
-
-                {/* Ganancias Semanales */}
-                <div className="bg-neutral-900 p-4 rounded-xl border border-neutral-800 space-y-3">
-                  <h3 className="text-xs font-bold text-red-500 uppercase tracking-wider">Ganancias de la Semana</h3>
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <div className="bg-neutral-950 p-2 rounded-lg"><span className="text-xs text-neutral-400 block">USD</span><span className="font-bold text-emerald-400">${stats.profits.USD.toFixed(1)}</span></div>
-                    <div className="bg-neutral-950 p-2 rounded-lg"><span className="text-xs text-neutral-400 block">VES</span><span className="font-bold text-sky-400">Bs{stats.profits.VES.toFixed(1)}</span></div>
-                    <div className="bg-neutral-950 p-2 rounded-lg"><span className="text-xs text-neutral-400 block">EUR</span><span className="font-bold text-amber-400">€{stats.profits.EUR.toFixed(1)}</span></div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* VISTA: INVENTARIO */}
-            {activeTab === 'inventory' && (
-              <div className="space-y-4">
-                <input type="text" placeholder="Buscar por nombre o SKU..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-neutral-900 border border-neutral-800 p-3 rounded-xl text-sm focus:outline-none focus:border-red-600" />
-                
-                <div className="space-y-2">
-                  {filteredProducts.map(product => (
-                    <div key={product.id} className="bg-neutral-900 p-3 rounded-xl border border-neutral-800 flex justify-between items-center">
-                      <div>
-                        <h4 className="font-bold text-sm text-white">{product.name}</h4>
-                        <p className="text-xs text-neutral-400">SKU: {product.sku} | Cat: {product.category}</p>
-                        <div className="flex gap-4 mt-1">
-                          <span className="text-xs font-bold text-emerald-400">Venta: ${product.sellingPrice}</span>
-                          <span className={`text-xs font-bold ${product.stock <= product.minStock ? 'text-red-500' : 'text-neutral-400'}`}>Cant: {product.stock}</span>
+            return (
+                <div class="flex flex-col min-h-screen">
+                    <header class="bg-neutral-900 border-b border-neutral-800 px-6 py-4 flex items-center justify-between sticky top-0 z-40">
+                        <div class="flex items-center gap-3">
+                            <div class="bg-red-600 text-white font-black px-3 py-1 rounded text-xl tracking-tighter">GZ</div>
+                            <span class="font-bold text-lg tracking-wide uppercase text-neutral-200">Lubricantes</span>
                         </div>
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <button onClick={() => openSaleModal(product)} className="bg-emerald-600 text-white font-bold text-[11px] px-2.5 py-1 rounded">Vender</button>
-                        <button onClick={() => { setEditingProduct(product); setProdForm({ ...product }); setShowProductModal(true); }} className="bg-neutral-800 text-neutral-300 font-bold text-[11px] px-2.5 py-1 rounded">Editar</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+                        <div class="flex items-center gap-2 text-sm text-neutral-400">
+                            <i class="fa-solid fa-circle text-emerald-500 text-[10px] animate-pulse"></i>
+                            <span>Consola Lista</span>
+                        </div>
+                    </header>
 
-            {/* VISTA: HISTORIAL DE VENTAS */}
-            {activeTab === 'sales' && (
-              <div className="space-y-2">
-                <h3 className="font-bold text-sm text-neutral-400 mb-2">Historial de Operaciones</h3>
-                {sales.map(sale => {
-                  const symbol = CURRENCIES.find(c => c.code === sale.currency)?.symbol || '$';
-                  return (
-                    <div key={sale.id} className="bg-neutral-900 p-3 rounded-xl border border-neutral-800 flex justify-between items-center text-xs">
-                      <div>
-                        <p className="font-bold text-white">{sale.productName}</p>
-                        <p className="text-neutral-500">{new Date(sale.date).toLocaleDateString()} - {sale.quantity} unds.</p>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-emerald-400 font-bold block">+{symbol}{(sale.sellingPrice * sale.quantity).toFixed(2)}</span>
-                        <span className="text-neutral-400 text-[10px]">Ganancia: {symbol}{sale.profit.toFixed(2)}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </main>
+                    <main class="flex-1 p-6 max-w-7xl w-full mx-auto">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                            <div class="bg-neutral-900 border border-neutral-800 p-5 rounded-xl flex items-center justify-between">
+                                <div><p class="text-xs text-neutral-400 uppercase">Productos</p><h3 class="text-3xl font-bold mt-1">{metrics.total}</h3></div>
+                                <div class="bg-neutral-800 p-3 rounded-lg"><i class="fa-solid fa-boxes-stacked text-xl"></i></div>
+                            </div>
+                            <div class="bg-neutral-900 border border-neutral-800 p-5 rounded-xl flex items-center justify-between">
+                                <div><p class="text-xs text-neutral-400 uppercase">Bajo Stock</p><h3 class="text-3xl font-bold mt-1 text-red-500">{metrics.low}</h3></div>
+                                <div class="bg-neutral-800 p-3 rounded-lg text-red-400"><i class="fa-solid fa-triangle-exclamation text-xl"></i></div>
+                            </div>
+                            <div class="bg-neutral-900 border border-neutral-800 p-5 rounded-xl flex items-center justify-between">
+                                <div><p class="text-xs text-neutral-400 uppercase">Valor Capital</p><h3 class="text-3xl font-bold mt-1 text-emerald-500">${metrics.value.toFixed(2)}</h3></div>
+                                <div class="bg-neutral-800 p-3 rounded-lg text-emerald-400"><i class="fa-solid fa-dollar-sign text-xl"></i></div>
+                            </div>
+                        </div>
 
-          {/* MODAL: PRODUCTO */}
-          {showProductModal && (
-            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 overflow-y-auto">
-              <form onSubmit={saveProduct} className="bg-neutral-900 p-5 rounded-2xl border border-neutral-800 w-full max-w-md space-y-3 my-auto">
-                <h3 className="font-black text-lg">{editingProduct ? 'Editar Artículo' : 'Nuevo Artículo'}</h3>
-                <div><label className="text-xs text-neutral-400">Nombre</label><input type="text" required value={prodForm.name} onChange={e => setProdForm({...prodForm, name: e.target.value})} className="w-full bg-neutral-950 p-2 rounded border border-neutral-800 text-sm focus:outline-none" /></div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs text-neutral-400">SKU</label><input type="text" required value={prodForm.sku} onChange={e => setProdForm({...prodForm, sku: e.target.value})} className="w-full bg-neutral-950 p-2 rounded border border-neutral-800 text-sm focus:outline-none" /></div>
-                  <div><label className="text-xs text-neutral-400">Categoría</label><select value={prodForm.category} onChange={e => setProdForm({...prodForm, category: e.target.value})} className="w-full bg-neutral-950 p-2 rounded border border-neutral-800 text-sm focus:outline-none">{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs text-neutral-400">Precio Costo ($)</label><input type="number" step="0.01" required value={prodForm.costPrice} onChange={e => setProdForm({...prodForm, costPrice: e.target.value})} className="w-full bg-neutral-950 p-2 rounded border border-neutral-800 text-sm focus:outline-none" /></div>
-                  <div><label className="text-xs text-neutral-400">Precio Venta ($)</label><input type="number" step="0.01" required value={prodForm.sellingPrice} onChange={e => setProdForm({...prodForm, sellingPrice: e.target.value})} className="w-full bg-neutral-950 p-2 rounded border border-neutral-800 text-sm focus:outline-none" /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs text-neutral-400">Cantidad Inicial</label><input type="number" required value={prodForm.stock} onChange={e => setProdForm({...prodForm, stock: e.target.value})} className="w-full bg-neutral-950 p-2 rounded border border-neutral-800 text-sm focus:outline-none" /></div>
-                  <div><label className="text-xs text-neutral-400">Stock Mínimo</label><input type="number" required value={prodForm.minStock} onChange={e => setProdForm({...prodForm, minStock: e.target.value})} className="w-full bg-neutral-950 p-2 rounded border border-neutral-800 text-sm focus:outline-none" /></div>
-                </div>
-                <div className="pt-2 flex justify-end gap-2">
-                  <button type="button" onClick={() => setShowProductModal(false)} className="bg-neutral-800 text-white font-bold text-xs px-4 py-2 rounded">Cancelar</button>
-                  <button type="submit" className="bg-red-600 text-white font-bold text-xs px-4 py-2 rounded">Guardar</button>
-                </div>
-              </form>
-            </div>
-          )}
+                        <div class="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
+                            <div class="relative w-full sm:w-80">
+                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 text-sm"></i>
+                                <input type="text" placeholder="Buscar producto..." class="w-full bg-neutral-950 border border-neutral-800 rounded-lg pl-9 pr-4 py-2 text-sm text-neutral-200 focus:outline-none focus:border-red-600" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+                            </div>
+                            <button onClick={() => openModal()} class="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-medium text-sm px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors">
+                                <i class="fa-solid fa-plus text-xs"></i> Agregar Producto
+                            </button>
+                        </div>
 
-          {/* MODAL: COMPRA / VENTA */}
-          {showSaleModal && (
-            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <form onSubmit={registerSale} className="bg-neutral-900 p-5 rounded-2xl border border-neutral-800 w-full max-w-sm space-y-4">
-                <div>
-                  <h3 className="font-black text-base">Registrar Venta</h3>
-                  <p className="text-xs text-neutral-400">{selectedProductForSale?.name}</p>
-                </div>
-                <div><label className="text-xs text-neutral-400">Cantidad a despachar</label><input type="number" min="1" max={selectedProductForSale?.stock} required value={saleQuantity} onChange={e => setSaleQuantity(e.target.value)} className="w-full bg-neutral-950 p-2 rounded border border-neutral-800 text-sm text-white focus:outline-none" /></div>
-                <div>
-                  <label className="text-xs text-neutral-400">Divisa de Pago</label>
-                  <select value={paymentCurrency} onChange={e => setPaymentCurrency(e.target.value)} className="w-full bg-neutral-950 p-2 rounded border border-neutral-800 text-sm text-white focus:outline-none">
-                    {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
-                  </select>
-                </div>
-                <div className="flex justify-end gap-2 text-xs">
-                  <button type="button" onClick={() => setShowSaleModal(false)} className="bg-neutral-800 px-4 py-2 font-bold rounded">Cerrar</button>
-                  <button type="submit" className="bg-emerald-600 text-white px-4 py-2 font-bold rounded">Confirmar Salida</button>
-                </div>
-              </form>
-            </div>
-          )}
-        </div>
-      );
-    }
+                        <div class="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr class="bg-neutral-950 border-b border-neutral-800 text-xs font-semibold text-neutral-400 uppercase">
+                                            <th class="px-6 py-4">Descripción</th>
+                                            <th class="px-6 py-4">Marca</th>
+                                            <th class="px-6 py-4 text-center">Stock</th>
+                                            <th class="px-6 py-4 text-right">Costo</th>
+                                            <th class="px-6 py-4 text-right">Venta</th>
+                                            <th class="px-6 py-4 text-center">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-neutral-800 text-sm">
+                                        {filtered.length > 0 ? (
+                                            filtered.map((p) => (
+                                                <tr key={p.id} class="hover:bg-neutral-800/30">
+                                                    <td class="px-6 py-4 font-medium text-white">{p.name} <span class="text-xs text-red-400 font-mono block">{p.viscosity} ({p.type})</span></td>
+                                                    <td class="px-6 py-4"><span class="bg-neutral-800 px-2 py-0.5 rounded text-xs border border-neutral-700">{p.brand}</span></td>
+                                                    <td class="px-6 py-4 text-center"><span class={`px-2 py-0.5 rounded text-xs font-bold ${p.stock <= 5 ? 'bg-red-950 text-red-400' : 'bg-neutral-950'}`}>{p.stock} und</span></td>
+                                                    <td class="px-6 py-4 text-right font-mono">${p.costPrice.toFixed(2)}</td>
+                                                    <td class="px-6 py-4 text-right font-mono text-emerald-400 font-medium">${p.sellingPrice.toFixed(2)}</td>
+                                                    <td class="px-6 py-4 text-center">
+                                                        <button onClick={() => openModal(p)} class="p-1.5 text-neutral-400 hover:text-white mr-2"><i class="fa-solid fa-pen-to-square"></i></button>
+                                                        <button onClick={() => handleDelete(p.id)} class="p-1.5 text-neutral-500 hover:text-red-400"><i class="fa-solid fa-trash-can"></i></button>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        ) : (
+                                            <tr><td colSpan="6" class="px-6 py-12 text-center text-neutral-500">No hay productos registrados.</td></tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </main>
 
-    const container = document.getElementById('root');
-    const root = createRoot(container);
-    root.render(<App />);
-  </script>
+                    {isModalOpen && (
+                        <div class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                            <div class="bg-neutral-900 border border-neutral-800 w-full max-w-md rounded-xl overflow-hidden">
+                                <div class="bg-neutral-950 px-6 py-4 border-b border-neutral-800 flex items-center justify-between">
+                                    <h3 class="font-bold text-white">{editingProduct ? 'Editar Producto' : 'Nuevo Producto'}</h3>
+                                    <button onClick={closeModal} class="text-neutral-500 hover:text-neutral-200"><i class="fa-solid fa-xmark"></i></button>
+                                </div>
+                                <form onSubmit={handleSubmit} class="p-6 space-y-4">
+                                    <div>
+                                        <label class="block text-xs font-medium text-neutral-400 uppercase mb-1">Nombre</label>
+                                        <input type="text" required class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-red-600" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="block text-xs font-medium text-neutral-400 uppercase mb-1">Marca</label>
+                                            <input type="text" required class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-red-600" value={formData.brand} onChange={(e) => setFormData({...formData, brand: e.target.value})} />
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-medium text-neutral-400 uppercase mb-1">Viscosidad</label>
+                                            <input type="text" required class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm font-mono text-neutral-200 focus:outline-none focus:border-red-600" value={formData.viscosity} onChange={(e) => setFormData({...formData, viscosity: e.target.value})} />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-medium text-neutral-400 uppercase mb-1">Base</label>
+                                        <select class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-red-600" value={formData.type} onChange={(e) => setFormData({...formData, type: e.target.value})}>
+                                            <option value="Mineral">Mineral</option>
+                                            <option value="Semisintético">Semisintético</option>
+                                            <option value="Sintético">Sintético</option>
+                                        </select>
+                                    </div>
+                                    <div class="grid grid-cols-3 gap-4">
+                                        <div>
+                                            <label class="block text-xs font-medium text-neutral-400 uppercase mb-1">Costo ($)</label>
+                                            <input type="number" step="0.01" required class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm font-mono text-neutral-200 focus:outline-none focus:border-red-600" value={formData.costPrice} onChange={(e) => setFormData({...formData, costPrice: e.target.value})} />
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-medium text-neutral-400 uppercase mb-1">Venta ($)</label>
+                                            <input type="number" step="0.01" required class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm font-mono text-neutral-200 focus:outline-none focus:border-red-600" value={formData.sellingPrice} onChange={(e) => setFormData({...formData, sellingPrice: e.target.value})} />
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-medium text-neutral-400 uppercase mb-1">Stock</label>
+                                            <input type="number" required class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-red-600" value={formData.stock} onChange={(e) => setFormData({...formData, stock: e.target.value})} />
+                                        </div>
+                                    </div>
+                                    <div class="pt-4 flex justify-end gap-3 border-t border-neutral-800">
+                                        <button type="button" onClick={closeModal} class="px-4 py-2 border border-neutral-800 rounded-lg text-sm text-neutral-400 hover:bg-neutral-950">Cancelar</button>
+                                        <button type="submit" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium text-sm rounded-lg">Guardar</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
 </body>
 </html>

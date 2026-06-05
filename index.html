@@ -1,526 +1,373 @@
-```react
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInWithCustomToken, 
-  signInAnonymously, 
-  onAuthStateChanged 
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  doc, 
-  setDoc, 
-  collection, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc 
-} from 'firebase/firestore';
-
-// --- CONFIGURACIÓN DE FIREBASE (PROPORCIONADA POR EL ENTORNO) ---
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'gz-lubricantes-app';
-
-// Categorías específicas de lubricantes
-const CATEGORIES = [
-  'Aceites Sintéticos',
-  'Aceites Semi-Sintéticos',
-  'Aceites Minerales',
-  'Líquidos de Freno',
-  'Grasas y Aditivos',
-  'Transmisión y Engranajes',
-  'Filtros',
-  'Otros'
-];
-
-// Monedas admitidas
-const CURRENCIES = [
-  { code: 'USD', name: 'Dólares ($)', symbol: '$' },
-  { code: 'VES', name: 'Bolívares (Bs)', symbol: 'Bs' },
-  { code: 'EUR', name: 'Euros (€)', symbol: '€' }
-];
-
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [products, setProducts] = useState([]);
-  const [sales, setSales] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('dashboard');
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GZ Lubricantes - Panel Administrativo</title>
   
-  // Filtros y búsquedas
-  const [searchQuery, setSearchQuery] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('');
+  <!-- Tailwind CSS para Estilos Modernos -->
+  <script src="https://cdn.tailwindcss.com"></script>
   
-  // Modales
-  const [showProductModal, setShowProductModal] = useState(false);
-  const [editingProduct, setEditingProduct] = useState(null);
-  const [showSaleModal, setShowSaleModal] = useState(false);
-  const [selectedProductForSale, setSelectedProductForSale] = useState(null);
-  const [saleQuantity, setSaleQuantity] = useState(1);
-  const [paymentCurrency, setPaymentCurrency] = useState('USD');
-  const [notification, setNotification] = useState(null);
-
-  // Formulario de Producto
-  const [prodForm, setProdForm] = useState({
-    name: '',
-    sku: '',
-    category: 'Aceites Sintéticos',
-    costPrice: '',
-    sellingPrice: '',
-    stock: '',
-    minStock: '',
-    image: ''
-  });
-
-  const fileInputRef = useRef(null);
-
-  // Mostrar notificaciones temporales
-  const triggerNotification = (message, type = 'success') => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 4000);
-  };
-
-  // --- EFECTO 1: AUTENTICACIÓN (REGLA MANDATORIA 3) ---
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (error) {
-        console.error("Error al autenticar:", error);
-        triggerNotification("Error de conexión con el servidor de seguridad.", "error");
+  <!-- Babel para procesar React y JSX en vivo desde el móvil -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Mapeo de Módulos (Importmap) para Firebase y React -->
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "firebase/app": "https://esm.sh/firebase@10.8.0/app",
+        "firebase/auth": "https://esm.sh/firebase@10.8.0/auth",
+        "firebase/firestore": "https://esm.sh/firebase@10.8.0/firestore"
       }
-    };
-    initAuth();
-
-    const unsubscribe = onAuthStateChanged(auth, (usr) => {
-      setUser(usr);
-      if (!usr) {
-        setLoading(false);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // --- EFECTO 2: CARGAR DATOS EN TIEMPO REAL DESDE CLOUD FIRESTORE (REGLAS 1 Y 2) ---
-  useEffect(() => {
-    if (!user) return;
-
-    setLoading(true);
-
-    // Rutas estrictas para datos compartidos/públicos del negocio (REGLA 1)
-    const productsColRef = collection(db, 'artifacts', appId, 'public', 'data', 'products');
-    const salesColRef = collection(db, 'artifacts', appId, 'public', 'data', 'sales');
-
-    // Escuchar productos en tiempo real (No hacemos query compleja para evitar problemas de índices - REGLA 2)
-    const unsubscribeProducts = onSnapshot(productsColRef, 
-      (snapshot) => {
-        const prodList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setProducts(prodList);
-        setLoading(false);
-      },
-      (error) => {
-        console.error("Error cargando productos de Firestore:", error);
-        triggerNotification("No se pudieron sincronizar los productos.", "error");
-        setLoading(false);
-      }
-    );
-
-    // Escuchar ventas en tiempo real
-    const unsubscribeSales = onSnapshot(salesColRef, 
-      (snapshot) => {
-        const salesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        // Ordenamos en memoria local (REGLA 2) para mostrar las más recientes arriba
-        salesList.sort((a, b) => new Date(b.date) - new Date(a.date));
-        setSales(salesList);
-      },
-      (error) => {
-        console.error("Error cargando ventas de Firestore:", error);
-        triggerNotification("No se pudieron sincronizar las transacciones.", "error");
-      }
-    );
-
-    return () => {
-      unsubscribeProducts();
-      unsubscribeSales();
-    };
-  }, [user]);
-
-  // --- CONTROL DE CARGA DE IMAGEN ---
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      if (file.size > 1 * 1024 * 1024) {
-        triggerNotification('La imagen es muy pesada. Máximo 1MB para almacenamiento en la nube.', 'error');
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setProdForm(prev => ({ ...prev, image: reader.result }));
-      };
-      reader.readAsDataURL(file);
     }
-  };
+  </script>
+</head>
+<body class="bg-neutral-950 text-neutral-100 antialiased">
 
-  const removeSelectedImage = () => {
-    setProdForm(prev => ({ ...prev, image: '' }));
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
+  <!-- Contenedor Raíz de React -->
+  <div id="root"></div>
 
-  // --- CÁLCULOS SEMANALES POR MONEDA ---
-  const stats = useMemo(() => {
-    const startOfWeek = new Date();
-    startOfWeek.setHours(0, 0, 0, 0);
-    const day = startOfWeek.getDay();
-    const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
-    startOfWeek.setDate(diff);
+  <!-- Código de la Aplicación -->
+  <script type="text/babel" data-type="module">
+    import React, { useState, useEffect, useMemo, useRef } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { initializeApp } from 'firebase/app';
+    import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+    import { getFirestore, doc, setDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 
-    const weeklySales = sales.filter(sale => new Date(sale.date) >= startOfWeek);
-
-    const profits = { USD: 0, VES: 0, EUR: 0 };
-    const revenues = { USD: 0, VES: 0, EUR: 0 };
-
-    weeklySales.forEach(sale => {
-      const cur = sale.currency || 'USD';
-      if (profits[cur] !== undefined) {
-        profits[cur] += sale.profit;
-        revenues[cur] += (sale.sellingPrice * sale.quantity);
-      }
-    });
-
-    const lowStockProducts = products.filter(p => p.stock <= p.minStock);
-    const totalInventoryValue = products.reduce((sum, p) => sum + (p.costPrice * p.stock), 0);
-    const expectedRevenue = products.reduce((sum, p) => sum + (p.sellingPrice * p.stock), 0);
-
-    const daysOfWeek = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-    const profitByDayUSD = Array(7).fill(0);
-
-    weeklySales.forEach(sale => {
-      if (sale.currency === 'USD') {
-        const date = new Date(sale.date);
-        let dayIndex = date.getDay() - 1; 
-        if (dayIndex === -1) dayIndex = 6; 
-        if (dayIndex >= 0 && dayIndex < 7) {
-          profitByDayUSD[dayIndex] += sale.profit;
-        }
-      }
-    });
-
-    return {
-      profits,
-      revenues,
-      lowStockCount: lowStockProducts.length,
-      totalProducts: products.length,
-      totalInventoryValue,
-      expectedProfit: expectedRevenue - totalInventoryValue,
-      profitByDayUSD,
-      daysOfWeek
-    };
-  }, [products, sales]);
-
-  // --- ACCIONES DE PRODUCTOS EN FIRESTORE ---
-  const openAddProductModal = () => {
-    setEditingProduct(null);
-    setProdForm({
-      name: '',
-      sku: `GZ-${Math.floor(1000 + Math.random() * 9000)}`,
-      category: 'Aceites Sintéticos',
-      costPrice: '',
-      sellingPrice: '',
-      stock: '',
-      minStock: '4',
-      image: ''
-    });
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    setShowProductModal(true);
-  };
-
-  const openEditProductModal = (product) => {
-    setEditingProduct(product);
-    setProdForm({
-      name: product.name,
-      sku: product.sku,
-      category: product.category,
-      costPrice: product.costPrice.toString(),
-      sellingPrice: product.sellingPrice.toString(),
-      stock: product.stock.toString(),
-      minStock: product.minStock.toString(),
-      image: product.image || ''
-    });
-    setShowProductModal(true);
-  };
-
-  const saveProduct = async (e) => {
-    e.preventDefault();
-    if (!user) return;
-
-    const cost = parseFloat(prodForm.costPrice);
-    const selling = parseFloat(prodForm.sellingPrice);
-    const stockQty = parseInt(prodForm.stock);
-    const minQty = parseInt(prodForm.minStock);
-
-    if (isNaN(cost) || isNaN(selling) || isNaN(stockQty) || isNaN(minQty)) {
-      triggerNotification('Ingresa valores numéricos válidos.', 'error');
-      return;
-    }
-
-    const payload = {
-      name: prodForm.name,
-      sku: prodForm.sku,
-      category: prodForm.category,
-      costPrice: cost,
-      sellingPrice: selling,
-      stock: stockQty,
-      minStock: minQty,
-      image: prodForm.image || ''
+    // --- CONFIGURACIÓN DE FIREBASE CON SEGURO ANTI-FALLOS ---
+    let firebaseConfig = {
+      apiKey: "FailsafeKeyForPreviewOnly",
+      authDomain: "gz-lubricantes.firebaseapp.com",
+      projectId: "gz-lubricantes",
+      storageBucket: "gz-lubricantes.appspot.com",
+      messagingSenderId: "000000000",
+      appId: "1:000000000:web:000000"
     };
 
     try {
-      if (editingProduct) {
-        // Actualizar en la nube
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'products', editingProduct.id);
-        await updateDoc(docRef, payload);
-        triggerNotification('Lubricante actualizado en la nube con éxito.');
-      } else {
-        // Guardar nuevo en la nube
-        const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'products');
-        await addDoc(colRef, payload);
-        triggerNotification('Nuevo aceite guardado permanentemente.');
+      if (typeof __firebase_config !== 'undefined') {
+        firebaseConfig = JSON.parse(__firebase_config);
       }
-      setShowProductModal(false);
-    } catch (err) {
-      console.error(err);
-      triggerNotification('Error al guardar en la nube. Inténtalo de nuevo.', 'error');
-    }
-  };
-
-  const deleteProduct = async (id) => {
-    if (!user) return;
-    if (window.confirm('¿Eliminar definitivamente este lubricante del inventario en la nube?')) {
-      try {
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'products', id);
-        await deleteDoc(docRef);
-        triggerNotification('Producto removido con éxito.', 'warning');
-      } catch (err) {
-        triggerNotification('Error al eliminar de la nube.', 'error');
-      }
-    }
-  };
-
-  // --- ACCIONES DE VENTAS EN FIRESTORE ---
-  const openSaleModal = (product) => {
-    if (product.stock <= 0) {
-      triggerNotification('No hay existencias disponibles.', 'error');
-      return;
-    }
-    setSelectedProductForSale(product);
-    setSaleQuantity(1);
-    setPaymentCurrency('USD');
-    setShowSaleModal(true);
-  };
-
-  const registerSale = async (e) => {
-    e.preventDefault();
-    if (!user || !selectedProductForSale) return;
-
-    const qty = parseInt(saleQuantity);
-    if (isNaN(qty) || qty <= 0) {
-      triggerNotification('Ingresa una cantidad de venta válida.', 'error');
-      return;
+    } catch (e) {
+      console.warn("Usando credenciales de prueba locales.");
     }
 
-    if (qty > selectedProductForSale.stock) {
-      triggerNotification(`Solo quedan ${selectedProductForSale.stock} envases disponibles.`, 'error');
-      return;
-    }
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'gz-lubricantes-app';
 
-    const unitProfit = selectedProductForSale.sellingPrice - selectedProductForSale.costPrice;
-    const totalProfit = unitProfit * qty;
+    const CATEGORIES = ['Aceites Sintéticos', 'Aceites Semi-Sintéticos', 'Aceites Minerales', 'Líquidos de Freno', 'Grasas y Aditivos', 'Transmisión y Engranajes', 'Filtros', 'Otros'];
+    const CURRENCIES = [
+      { code: 'USD', name: 'Dólares ($)', symbol: '$' },
+      { code: 'VES', name: 'Bolívares (Bs)', symbol: 'Bs' },
+      { code: 'EUR', name: 'Euros (€)', symbol: '€' }
+    ];
 
-    try {
-      // 1. Agregar transacción de venta a la base de datos
-      const salesColRef = collection(db, 'artifacts', appId, 'public', 'data', 'sales');
-      await addDoc(salesColRef, {
-        productId: selectedProductForSale.id,
-        productName: selectedProductForSale.name,
-        quantity: qty,
-        costPrice: selectedProductForSale.costPrice,
-        sellingPrice: selectedProductForSale.sellingPrice,
-        profit: totalProfit,
-        currency: paymentCurrency,
-        date: new Date().toISOString()
-      });
-
-      // 2. Descontar stock del producto en la nube
-      const productDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'products', selectedProductForSale.id);
-      await updateDoc(productDocRef, {
-        stock: selectedProductForSale.stock - qty
-      });
-
-      setShowSaleModal(false);
-      const curSymbol = CURRENCIES.find(c => c.code === paymentCurrency)?.symbol || '$';
-      triggerNotification(`¡Venta guardada! Ganancia de esta transacción: ${curSymbol}${totalProfit.toFixed(2)}`);
-    } catch (err) {
-      console.error(err);
-      triggerNotification('No se pudo procesar la venta.', 'error');
-    }
-  };
-
-  const filteredProducts = useMemo(() => {
-    return products.filter(p => {
-      const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.sku.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesCategory = categoryFilter === '' || p.category === categoryFilter;
-      return matchesSearch && matchesCategory;
-    });
-  }, [products, searchQuery, categoryFilter]);
-
-  const renderProductThumbnail = (product, sizeClass = "w-11 h-11") => {
-    if (product.image) {
-      return (
-        <img 
-          src={product.image} 
-          alt={product.name} 
-          className={`${sizeClass} rounded-lg object-cover border border-red-500/20 shadow-md`} 
-        />
-      );
-    }
-    return (
-      <div className={`${sizeClass} rounded-lg bg-red-950/40 border border-red-500/30 flex items-center justify-center text-red-500 shadow-sm`}>
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-        </svg>
-      </div>
-    );
-  };
-
-  // Pre-cargando pantalla de carga de base de datos
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-neutral-100">
-        <div className="bg-red-600 text-white p-4 rounded-xl font-black text-3xl tracking-tighter shadow-lg shadow-red-600/30 animate-pulse">
-          GZ
-        </div>
-        <p className="mt-4 font-bold text-sm text-neutral-300">Estableciendo conexión en la nube...</p>
-        <p className="text-xs text-red-500 font-bold tracking-widest uppercase mt-1">GZ LUBRICANTES</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans selection:bg-red-600 selection:text-white">
+    function App() {
+      const [user, setUser] = useState(null);
+      const [products, setProducts] = useState([]);
+      const [sales, setSales] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [activeTab, setActiveTab] = useState('dashboard');
+      const [searchQuery, setSearchQuery] = useState('');
+      const [categoryFilter, setCategoryFilter] = useState('');
       
-      {/* HEADER / BARRA DE NAVEGACIÓN */}
-      <header className="bg-neutral-950 border-b-2 border-red-600 sticky top-0 z-40 shadow-2xl">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-20">
-            
-            <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setActiveTab('dashboard')}>
-              <div className="bg-red-600 text-white p-3 rounded-xl font-black text-2xl tracking-tighter shadow-lg shadow-red-600/30">
-                GZ
-              </div>
-              <div>
-                <span className="font-extrabold text-xl tracking-tight block text-white">GZ LUBRICANTES</span>
-                <span className="text-[10px] text-red-500 font-bold tracking-widest uppercase flex items-center gap-1">
-                  <span className="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></span>
-                  Nube Sincronizada
-                </span>
-              </div>
-            </div>
-            
-            {/* Navegación Desktop */}
-            <nav className="hidden md:flex space-x-2">
-              <button 
-                onClick={() => setActiveTab('dashboard')} 
-                className={`px-4 py-2.5 rounded-lg text-sm font-bold transition duration-200 ${activeTab === 'dashboard' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'text-neutral-300 hover:bg-neutral-900 hover:text-red-500'}`}
-              >
-                Panel de Control
-              </button>
-              <button 
-                onClick={() => setActiveTab('inventory')} 
-                className={`px-4 py-2.5 rounded-lg text-sm font-bold transition duration-200 ${activeTab === 'inventory' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'text-neutral-300 hover:bg-neutral-900 hover:text-red-500'}`}
-              >
-                Inventario
-              </button>
-              <button 
-                onClick={() => setActiveTab('sales')} 
-                className={`px-4 py-2.5 rounded-lg text-sm font-bold transition duration-200 ${activeTab === 'sales' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'text-neutral-300 hover:bg-neutral-900 hover:text-red-500'}`}
-              >
-                Vender / Transacciones
-              </button>
-            </nav>
+      const [showProductModal, setShowProductModal] = useState(false);
+      const [editingProduct, setEditingProduct] = useState(null);
+      const [showSaleModal, setShowSaleModal] = useState(false);
+      const [selectedProductForSale, setSelectedProductForSale] = useState(null);
+      const [saleQuantity, setSaleQuantity] = useState(1);
+      const [paymentCurrency, setPaymentCurrency] = useState('USD');
+      const [notification, setNotification] = useState(null);
+
+      const [prodForm, setProdForm] = useState({
+        name: '', sku: '', category: 'Aceites Sintéticos', costPrice: '', sellingPrice: '', stock: '', minStock: '', image: ''
+      });
+
+      const fileInputRef = useRef(null);
+
+      const triggerNotification = (message, type = 'success') => {
+        setNotification({ message, type });
+        setTimeout(() => setNotification(null), 4000);
+      };
+
+      useEffect(() => {
+        const initAuth = async () => {
+          try {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+              await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+              await signInAnonymously(auth);
+            }
+          } catch (error) {
+            console.error("Error al autenticar:", error);
+            setLoading(false);
+          }
+        };
+        initAuth();
+
+        return onAuthStateChanged(auth, (usr) => {
+          setUser(usr);
+          if (!usr) setLoading(false);
+        });
+      }, []);
+
+      useEffect(() => {
+        if (!user) return;
+        setLoading(true);
+
+        const productsColRef = collection(db, 'artifacts', appId, 'public', 'data', 'products');
+        const salesColRef = collection(db, 'artifacts', appId, 'public', 'data', 'sales');
+
+        const unsubscribeProducts = onSnapshot(productsColRef, (snapshot) => {
+          setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+          setLoading(false);
+        }, () => setLoading(false));
+
+        const unsubscribeSales = onSnapshot(salesColRef, (snapshot) => {
+          const salesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          salesList.sort((a, b) => new Date(b.date) - new Date(a.date));
+          setSales(salesList);
+        });
+
+        return () => { unsubscribeProducts(); unsubscribeSales(); };
+      }, [user]);
+
+      const handleImageUpload = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          if (file.size > 1 * 1024 * 1024) {
+            triggerNotification('La imagen supera el límite de 1MB.', 'error');
+            return;
+          }
+          const reader = new FileReader();
+          reader.onloadend = () => setProdForm(prev => ({ ...prev, image: reader.result }));
+          reader.readAsDataURL(file);
+        }
+      };
+
+      const stats = useMemo(() => {
+        const startOfWeek = new Date();
+        startOfWeek.setHours(0, 0, 0, 0);
+        startOfWeek.setDate(startOfWeek.getDate() - (startOfWeek.getDay() || 7) + 1);
+
+        const weeklySales = sales.filter(sale => new Date(sale.date) >= startOfWeek);
+        const profits = { USD: 0, VES: 0, EUR: 0 };
+        const revenues = { USD: 0, VES: 0, EUR: 0 };
+
+        weeklySales.forEach(sale => {
+          const cur = sale.currency || 'USD';
+          if (profits[cur] !== undefined) {
+            profits[cur] += sale.profit || 0;
+            revenues[cur] += (sale.sellingPrice * sale.quantity) || 0;
+          }
+        });
+
+        const lowStockProducts = products.filter(p => p.stock <= p.minStock);
+        const totalInventoryValue = products.reduce((sum, p) => sum + (p.costPrice * p.stock), 0);
+
+        return { profits, revenues, lowStockCount: lowStockProducts.length, totalProducts: products.length, totalInventoryValue };
+      }, [products, sales]);
+
+      const openAddProductModal = () => {
+        setEditingProduct(null);
+        setProdForm({ name: '', sku: `GZ-${Math.floor(1000 + Math.random() * 9000)}`, category: 'Aceites Sintéticos', costPrice: '', sellingPrice: '', stock: '', minStock: '4', image: '' });
+        setShowProductModal(true);
+      };
+
+      const saveProduct = async (e) => {
+        e.preventDefault();
+        const payload = {
+          name: prodForm.name, sku: prodForm.sku, category: prodForm.category,
+          costPrice: parseFloat(prodForm.costPrice), sellingPrice: parseFloat(prodForm.sellingPrice),
+          stock: parseInt(prodForm.stock), minStock: parseInt(prodForm.minStock), image: prodForm.image || ''
+        };
+
+        try {
+          if (editingProduct) {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', editingProduct.id), payload);
+            triggerNotification('Cambios guardados con éxito.');
+          } else {
+            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'products'), payload);
+            triggerNotification('Nuevo producto registrado.');
+          }
+          setShowProductModal(false);
+        } catch (err) {
+          triggerNotification('Error al guardar en la nube.', 'error');
+        }
+      };
+
+      const registerSale = async (e) => {
+        e.preventDefault();
+        const qty = parseInt(saleQuantity);
+        if (qty > selectedProductForSale.stock) return;
+
+        const totalProfit = (selectedProductForSale.sellingPrice - selectedProductForSale.costPrice) * qty;
+
+        try {
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'sales'), {
+            productId: selectedProductForSale.id, productName: selectedProductForSale.name,
+            quantity: qty, costPrice: selectedProductForSale.costPrice, sellingPrice: selectedProductForSale.sellingPrice,
+            profit: totalProfit, currency: paymentCurrency, date: new Date().toISOString()
+          });
+
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', selectedProductForSale.id), {
+            stock: selectedProductForSale.stock - qty
+          });
+
+          setShowSaleModal(false);
+          triggerNotification('Venta registrada con éxito.');
+        } catch (err) {
+          triggerNotification('Error al procesar transaccion.', 'error');
+        }
+      };
+
+      const filteredProducts = useMemo(() => {
+        return products.filter(p => {
+          const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.sku.toLowerCase().includes(searchQuery.toLowerCase());
+          const matchesCategory = categoryFilter === '' || p.category === categoryFilter;
+          return matchesSearch && matchesCategory;
+        });
+      }, [products, searchQuery, categoryFilter]);
+
+      if (loading) {
+        return (
+          <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center">
+            <div className="bg-red-600 text-white p-4 rounded-xl font-black text-3xl animate-pulse">GZ</div>
+            <p className="mt-4 text-sm font-bold text-neutral-400">Sincronizando Base de Datos...</p>
           </div>
-        </div>
-      </header>
+        );
+      }
 
-      {/* NOTIFICACIONES */}
-      {notification && (
-        <div className="fixed top-24 right-4 z-50 max-w-sm w-full bg-neutral-900 border-l-4 border-red-600 rounded-lg shadow-2xl overflow-hidden animate-slide-in">
-          <div className="p-4 flex items-center">
-            <div className="ml-3">
-              <p className="text-sm font-bold text-red-500">
-                {notification.type === 'success' ? 'Completado' : 'Mensaje del Sistema'}
-              </p>
-              <p className="text-xs text-neutral-300 mt-1">{notification.message}</p>
+      return (
+        <div className="min-h-screen flex flex-col">
+          <header className="bg-neutral-900 border-b border-red-600 p-4 sticky top-0 z-40">
+            <div className="max-w-7xl mx-auto flex justify-between items-center">
+              <div className="flex items-center space-x-3">
+                <div className="bg-red-600 text-white px-3 py-1.5 rounded-lg font-black text-xl">GZ</div>
+                <div>
+                  <h1 className="font-bold text-lg text-white leading-none">GZ LUBRICANTES</h1>
+                  <span className="text-[10px] text-emerald-400 font-semibold uppercase tracking-wider">● En Línea</span>
+                </div>
+              </div>
             </div>
+          </header>
+
+          {/* Menú de pestañas para móvil */}
+          <div className="flex bg-neutral-900 p-1 border-b border-neutral-800 sticky top-[73px] z-30">
+            {['dashboard', 'inventory', 'sales'].map((tab) => (
+              <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 py-2 text-xs font-bold uppercase rounded-md transition ${activeTab === tab ? 'bg-red-600 text-white' : 'text-neutral-400'}`}>
+                {tab === 'dashboard' ? 'Panel' : tab === 'inventory' ? 'Inventario' : 'Ventas'}
+              </button>
+            ))}
           </div>
-        </div>
-      )}
 
-      {/* CUERPO PRINCIPAL */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        
-        {/* NAVEGACIÓN MÓVIL */}
-        <div className="flex md:hidden bg-neutral-900 p-1.5 rounded-xl shadow-inner mb-6 border border-neutral-800">
-          <button 
-            onClick={() => setActiveTab('dashboard')} 
-            className={`flex-1 py-2.5 text-xs font-bold text-center rounded-lg transition ${activeTab === 'dashboard' ? 'bg-red-600 text-white' : 'text-neutral-400'}`}
-          >
-            Panel
-          </button>
-          <button 
-            onClick={() => setActiveTab('inventory')} 
-            className={`flex-1 py-2.5 text-xs font-bold text-center rounded-lg transition ${activeTab === 'inventory' ? 'bg-red-600 text-white' : 'text-neutral-400'}`}
-          >
-            Inventario
-          </button>
-          <button 
-            onClick={() => setActiveTab('sales')} 
-            className={`flex-1 py-2.5 text-xs font-bold text-center rounded-lg transition ${activeTab === 'sales' ? 'bg-red-600 text-white' : 'text-neutral-400'}`}
-          >
-            Ventas
-          </button>
-        </div>
-
-        {/* 1. SECCIÓN: PANEL DE CONTROL */}
-        {activeTab === 'dashboard' && (
-          <div className="space-y-6">
+          <main className="flex-1 p-4 max-w-7xl w-full mx-auto space-y-6">
             
-            {/* BIENVENIDA */}
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-gradient-to-r from-neutral-950 to-neutral-900 p-6 rounded-2xl border border-neutral-800 shadow-xl">
-              <div>
-                <h1 className="text-2xl font-black text-white tracking-tight">Administración GZ Lubricantes</h1>
-                <p className="text-neutral-400 text-sm mt-1">Tus datos están guardándose de forma automática en la nube de Firebase. Puedes recargar libremente.</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button 
-                  onClick={openAddProductModal}
-                  className="bg-red-600 hover:bg-red-700 text-white font-extrabold px-5 py-3 rounded-xl text-sm shadow-lg shadow-red-600/20 transition duration-200 flex items-center gap-1.5"
-                >
-                  <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
-                  Registrar Lubricante
-                </button>
-              </div>
-            </div>
+            {/* VISTA: PANEL */}
+            {activeTab === 'dashboard' && (
+              <div className="space-y-6">
+                <div className="bg-neutral-900 p-4 rounded-xl border border-neutral-800 flex justify-between items-center">
+                  <div>
+                    <h2 className="text-xl font-black">Panel General</h2>
+                    <p className="text-xs text-neutral-400">Métricas acumuladas del inventario.</p>
+                  </div>
+                  <button onClick={openAddProductModal} className="bg-red-600 text-white font-bold text-xs px-3 py-2 rounded-lg">
+                    + Agregar Aceite
+                  </button>
+                </div>
 
-            {/* SECCIÓN MULTIDIVISA - GANANCIAS DE LA SEMANA */}
-            <div>
-              <h2 className="text-xs font-bold text-red-500 uppercase tracking-widest mb-3 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse"></span>
-                Ganancias Net
+                {/* Tarjetas de Indicadores */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-neutral-900 p-3 rounded-xl border border-neutral-800">
+                    <p className="text-xs text-neutral-400">Modelos en Stock</p>
+                    <p className="text-xl font-black text-white">{stats.totalProducts}</p>
+                  </div>
+                  <div className="bg-neutral-900 p-3 rounded-xl border border-neutral-800">
+                    <p className="text-xs text-neutral-400">Bajo Stock (Alerta)</p>
+                    <p className="text-xl font-black text-red-500">{stats.lowStockCount}</p>
+                  </div>
+                </div>
+
+                {/* Ganancias Semanales */}
+                <div className="bg-neutral-900 p-4 rounded-xl border border-neutral-800 space-y-3">
+                  <h3 className="text-xs font-bold text-red-500 uppercase tracking-wider">Ganancias de la Semana</h3>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-neutral-950 p-2 rounded-lg"><span className="text-xs text-neutral-400 block">USD</span><span className="font-bold text-emerald-400">${stats.profits.USD.toFixed(1)}</span></div>
+                    <div className="bg-neutral-950 p-2 rounded-lg"><span className="text-xs text-neutral-400 block">VES</span><span className="font-bold text-sky-400">Bs{stats.profits.VES.toFixed(1)}</span></div>
+                    <div className="bg-neutral-950 p-2 rounded-lg"><span className="text-xs text-neutral-400 block">EUR</span><span className="font-bold text-amber-400">€{stats.profits.EUR.toFixed(1)}</span></div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* VISTA: INVENTARIO */}
+            {activeTab === 'inventory' && (
+              <div className="space-y-4">
+                <input type="text" placeholder="Buscar por nombre o SKU..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-neutral-900 border border-neutral-800 p-3 rounded-xl text-sm focus:outline-none focus:border-red-600" />
+                
+                <div className="space-y-2">
+                  {filteredProducts.map(product => (
+                    <div key={product.id} className="bg-neutral-900 p-3 rounded-xl border border-neutral-800 flex justify-between items-center">
+                      <div>
+                        <h4 className="font-bold text-sm text-white">{product.name}</h4>
+                        <p className="text-xs text-neutral-400">SKU: {product.sku} | Cat: {product.category}</p>
+                        <div className="flex gap-4 mt-1">
+                          <span className="text-xs font-bold text-emerald-400">Venta: ${product.sellingPrice}</span>
+                          <span className={`text-xs font-bold ${product.stock <= product.minStock ? 'text-red-500' : 'text-neutral-400'}`}>Cant: {product.stock}</span>
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <button onClick={() => openSaleModal(product)} className="bg-emerald-600 text-white font-bold text-[11px] px-2.5 py-1 rounded">Vender</button>
+                        <button onClick={() => { setEditingProduct(product); setProdForm({ ...product }); setShowProductModal(true); }} className="bg-neutral-800 text-neutral-300 font-bold text-[11px] px-2.5 py-1 rounded">Editar</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* VISTA: HISTORIAL DE VENTAS */}
+            {activeTab === 'sales' && (
+              <div className="space-y-2">
+                <h3 className="font-bold text-sm text-neutral-400 mb-2">Historial de Operaciones</h3>
+                {sales.map(sale => {
+                  const symbol = CURRENCIES.find(c => c.code === sale.currency)?.symbol || '$';
+                  return (
+                    <div key={sale.id} className="bg-neutral-900 p-3 rounded-xl border border-neutral-800 flex justify-between items-center text-xs">
+                      <div>
+                        <p className="font-bold text-white">{sale.productName}</p>
+                        <p className="text-neutral-500">{new Date(sale.date).toLocaleDateString()} - {sale.quantity} unds.</p>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-emerald-400 font-bold block">+{symbol}{(sale.sellingPrice * sale.quantity).toFixed(2)}</span>
+                        <span className="text-neutral-400 text-[10px]">Ganancia: {symbol}{sale.profit.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </main>
+
+          {/* MODAL: PRODUCTO */}
+          {showProductModal && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 overflow-y-auto">
+              <form onSubmit={saveProduct} className="bg-neutral-900 p-5 rounded-2xl border border-neutral-800 w-full max-w-md space-y-3 my-auto">
+                <h3 className="font-black text-lg">{editingProduct ? 'Editar Artículo' : 'Nuevo Artículo'}</h3>
+                <div><label className="text-xs text-neutral-400">Nombre</label><input type="text" required value={prodForm.name} onChange={e => setProdForm({...prodForm, name: e.target.value})} className="w-full bg-neutral-950 p-2 rounded border border-neutral-800 text-sm focus:outline-none" /></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs text-neutral-400">SKU</label><input type="text" required value={prodForm.sku} onChange={e => setProdForm({...prodForm, sku: e.target.value})} className="w-full bg-neutral-950 p-2 rounded border border-neutral-800 text-sm focus:outline-none" /></div>
+                  <div><label className="text-xs text-neutral-400">Categoría</label><select value={prodForm.category} onChange={e => setProdForm({...prodForm, category: e.target.value})} className="w-full bg-neutral-950 p-2 rounded border border-neutral-800 text-sm focus:outline-none">{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs text-neutral-400">Precio Costo ($)</label><input type="number" step="0.01" required value={prodForm.costPrice} onChange={e => setProdForm({...prodForm, costPrice: e.target.value})} className="w-full bg-neutral-950 p-2 rounded border border-neutral-800 text-sm focus:outline-none" /></div>
+                  <div><label className="text-xs text-neutral-400">Precio Venta ($)</label><input type="number" step="0.01" required value={prodForm.sellingPrice} onChange={e => setProdForm({...prodForm, sellingPrice: e.target.value})} className="w-full bg-neutral-950 p-2 rounded border border-neutral-800 text-sm focus:outline-none" /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs text-neutral-400">Cantidad Inicial</label><input type="number" required value={prodForm.stock} onChange={e => setProdForm({...prodForm, stock: e.target.value})} className="w-full bg-neutral-950 p-2 rounded border border-neutral-800 text-sm focus:outline-none" /></div>
+                  <div><label className="text-xs text-neutral-400">Stock Mínimo</label><input type="number" required value={prodForm.minStock} onChange={e => setProdForm({...prodForm, minStock: e.target.value})} className="w-full bg-neutral-950 p-2 r
